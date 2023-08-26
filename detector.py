@@ -8,6 +8,8 @@
 import logging
 import os
 import json
+
+import ipdb
 import jsonpickle
 import pickle
 import numpy as np
@@ -15,13 +17,13 @@ import datasets
 import torch
 import transformers
 
-from sklearn.ensemble import RandomForestRegressor
-
 from utils.abstract import AbstractDetector
 from utils.models import load_model, load_models_dirpath
 import utils.qa_utils
 
-
+from utils import trojai_utils
+from utils.trojai_utils import *
+from utils.nlp2023_utils import *
 
 
 class Detector(AbstractDetector):
@@ -41,58 +43,6 @@ class Detector(AbstractDetector):
         self.model_layer_map_filepath = os.path.join(self.learned_parameters_dirpath, "model_layer_map.bin")
         self.layer_transform_filepath = os.path.join(self.learned_parameters_dirpath, "layer_transform.bin")
 
-        self.input_features = metaparameters["train_input_features"]
-        self.weight_params = {
-            "rso_seed": metaparameters["train_weight_rso_seed"],
-            "mean": metaparameters["train_weight_params_mean"],
-            "std": metaparameters["train_weight_params_std"],
-        }
-        self.random_forest_kwargs = {
-            "n_estimators": metaparameters[
-                "train_random_forest_regressor_param_n_estimators"
-            ],
-            "criterion": metaparameters[
-                "train_random_forest_regressor_param_criterion"
-            ],
-            "max_depth": metaparameters[
-                "train_random_forest_regressor_param_max_depth"
-            ],
-            "min_samples_split": metaparameters[
-                "train_random_forest_regressor_param_min_samples_split"
-            ],
-            "min_samples_leaf": metaparameters[
-                "train_random_forest_regressor_param_min_samples_leaf"
-            ],
-            "min_weight_fraction_leaf": metaparameters[
-                "train_random_forest_regressor_param_min_weight_fraction_leaf"
-            ],
-            "max_features": metaparameters[
-                "train_random_forest_regressor_param_max_features"
-            ],
-            "min_impurity_decrease": metaparameters[
-                "train_random_forest_regressor_param_min_impurity_decrease"
-            ],
-        }
-
-    def write_metaparameters(self):
-        metaparameters = {
-            "train_input_features": self.input_features,
-            "train_weight_rso_seed": self.weight_params["rso_seed"],
-            "train_weight_params_mean": self.weight_params["mean"],
-            "train_weight_params_std": self.weight_params["std"],
-            "train_random_forest_regressor_param_n_estimators": self.random_forest_kwargs["n_estimators"],
-            "train_random_forest_regressor_param_criterion": self.random_forest_kwargs["criterion"],
-            "train_random_forest_regressor_param_max_depth": self.random_forest_kwargs["max_depth"],
-            "train_random_forest_regressor_param_min_samples_split": self.random_forest_kwargs["min_samples_split"],
-            "train_random_forest_regressor_param_min_samples_leaf": self.random_forest_kwargs["min_samples_leaf"],
-            "train_random_forest_regressor_param_min_weight_fraction_leaf": self.random_forest_kwargs["min_weight_fraction_leaf"],
-            "train_random_forest_regressor_param_max_features": self.random_forest_kwargs["max_features"],
-            "train_random_forest_regressor_param_min_impurity_decrease": self.random_forest_kwargs["min_impurity_decrease"],
-        }
-
-        with open(os.path.join(self.learned_parameters_dirpath, os.path.basename(self.metaparameter_filepath)), "w") as fp:
-            fp.write(jsonpickle.encode(metaparameters, warn=True, indent=2))
-
     def automatic_configure(self, models_dirpath: str):
         """Configuration of the detector iterating on some of the parameters from the
         metaparameter file, performing a grid search type approach to optimize these
@@ -101,130 +51,19 @@ class Detector(AbstractDetector):
         Args:
             models_dirpath: str - Path to the list of model to use for training
         """
+
+        # dataset=trinity.extract_dataset(models_dirpath,ts_engine=trinity.ts_engine,params=self.params)
+        # splits=crossval.split(dataset,self.params)
+        # ensemble,perf=crossval.train(splits,self.params)
+        # torch.save(ensemble,os.path.join(self.learned_parameters_dirpath,'model.pt'))
+        # return True
+
         for random_seed in np.random.randint(1000, 9999, 10):
-            self.weight_params["rso_seed"] = random_seed
-            self.manual_configure(models_dirpath)
+            pass
+        return True
 
     def manual_configure(self, models_dirpath: str):
-        """Configuration of the detector using the parameters from the metaparameters
-        JSON file.
-
-        Args:
-            models_dirpath: str - Path to the list of model to use for training
-        """
-        # Create the learned parameter folder if needed
-        if not os.path.exists(self.learned_parameters_dirpath):
-            os.makedirs(self.learned_parameters_dirpath)
-
-        # List all available model
-        model_path_list = sorted([os.path.join(models_dirpath, model) for model in os.listdir(models_dirpath)])
-        logging.info(f"Loading %d models...", len(model_path_list))
-
-        model_repr_dict, model_ground_truth_dict = load_models_dirpath(model_path_list)
-
-        logging.info("Building RandomForest based on random features, with the provided mean and std.")
-        rso = np.random.RandomState(seed=self.weight_params['rso_seed'])
-        X = []
-        y = []
-        for model_arch in model_repr_dict.keys():
-            for model_index in range(len(model_repr_dict[model_arch])):
-                y.append(model_ground_truth_dict[model_arch][model_index])
-
-                model_feats = rso.normal(loc=self.weight_params['mean'], scale=self.weight_params['std'], size=(1,self.input_features))
-                X.append(model_feats)
-        X = np.vstack(X)
-
-        logging.info("Training RandomForestRegressor model.")
-        model = RandomForestRegressor(**self.random_forest_kwargs, random_state=0)
-        model.fit(X, y)
-
-        logging.info("Saving RandomForestRegressor model...")
-        with open(self.model_filepath, "wb") as fp:
-            pickle.dump(model, fp)
-
-        self.write_metaparameters()
-        logging.info("Configuration done!")
-
-    def inference_on_example_data(self, model, tokenizer_filepath, examples_dirpath, scratch_dirpath):
-        """Method to demonstrate how to inference on a round's example data.
-
-        Args:
-            model: the pytorch model
-            tokenizer_filepath: filepath to the appropriate tokenizer
-            examples_dirpath: the directory path for the round example data
-        """
-
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        logging.info("Using compute device: {}".format(device))
-
-        model.to(device)
-        model.eval()
-
-        logging.info("Loading the tokenizer")
-        # Load the provided tokenizer
-        tokenizer = torch.load(tokenizer_filepath)
-
-        logging.info("Loading the example data")
-        fns = [os.path.join(examples_dirpath, fn) for fn in os.listdir(examples_dirpath) if fn.endswith('.json')]
-        fns.sort()
-        examples_filepath = fns[0]
-
-        # TODO The cache_dir is required for the test server since /home/trojai is not writable and the default cache locations is ~/.cache
-        dataset = datasets.load_dataset('json', data_files=[examples_filepath], field='data', keep_in_memory=True, split='train', cache_dir=os.path.join(scratch_dirpath, '.cache'))
-
-        logging.info("Tokenizer loaded")
-        tokenized_dataset = utils.qa_utils.tokenize(tokenizer, dataset)
-        logging.info("Examples tokenized")
-        dataloader = torch.utils.data.DataLoader(tokenized_dataset, batch_size=1)
-        logging.info("Examples wrapped into a dataloader")
-
-        tokenized_dataset.set_format('pt', columns=['input_ids', 'attention_mask', 'token_type_ids', 'start_positions', 'end_positions'])
-        # use Squad_v2 metrics
-        metric = None
-        # metric = evaluate.load("squad_v2")  # requires internet and does not work in the container
-        logging.info("Squad_v2 Metric loaded")
-
-        all_preds = None
-        with torch.no_grad():
-            for batch_idx, tensor_dict in enumerate(dataloader):
-                logging.info("Infer batch {}".format(batch_idx))
-                tensor_dict = utils.qa_utils.prepare_inputs(tensor_dict, device)
-
-                model_output_dict = model(**tensor_dict)
-
-                if 'loss' in model_output_dict.keys():
-                    batch_train_loss = model_output_dict['loss']
-                    # handle if multi-gpu
-                    batch_train_loss = torch.mean(batch_train_loss)
-
-                logits = tuple(v for k, v in model_output_dict.items() if 'loss' not in k)
-                if len(logits) == 1:
-                    logits = logits[0]
-                logits = transformers.trainer_pt_utils.nested_detach(logits)
-
-                all_preds = logits if all_preds is None else transformers.trainer_pt_utils.nested_concat(all_preds, logits, padding_index=-100)
-
-        all_preds = transformers.trainer_pt_utils.nested_numpify(all_preds)
-
-        # ensure correct columns are being yielded to the postprocess
-        tokenized_dataset.set_format()
-
-        logging.info("Post processing predictions")
-        predictions = utils.qa_utils.postprocess_qa_predictions(dataset, tokenized_dataset, all_preds, version_2_with_negative=True)
-        predictions = [
-            {"id": k, "prediction_text": v, "no_answer_probability": 0.0} for k, v in predictions.items()
-        ]
-
-        references = [{"id": ex["id"], "answers": ex['answers']} for ex in dataset]
-
-        if metric is not None:
-            metrics = metric.compute(predictions=predictions, references=references)
-            for k in metrics.keys():
-                if 'f1' in k or 'exact' in k:
-                    metrics[k] = metrics[k] / 100.0
-
-            logging.info("Metrics:")
-            logging.info(metrics)
+        return self.automatic_configure(models_dirpath)
 
 
     def infer(
@@ -250,35 +89,35 @@ class Detector(AbstractDetector):
         # load the model
         model, model_repr, model_class = load_model(model_filepath)
 
-        # Inferences on examples to demonstrate how it is done for a round
-        self.inference_on_example_data(model, tokenizer_filepath, examples_dirpath, scratch_dirpath)
+        all_features = extract_params_hist(model.base_model.encoder)  # encoder only and no embeddings
+        print("feature shape ",all_features.shape)
 
-        # build a fake random feature vector for this model, in order to compute its probability of poisoning
-        rso = np.random.RandomState(seed=self.weight_params['rso_seed'])
-        X = rso.normal(loc=self.weight_params['mean'], scale=self.weight_params['std'], size=(1, self.input_features))
+        if self.learned_parameters_dirpath is not None:
+            try:
+                ensemble = torch.load(os.path.join(self.learned_parameters_dirpath, 'bestnlp2023_statedict.pth'))
+            except:
+                ensemble = torch.load(os.path.join('/', self.learned_parameters_dirpath, 'bestnlp2023_statedict.pth'))
 
-        # # create a random model for testing (fit to nothing)
-        # model = RandomForestRegressor(**self.random_forest_kwargs, random_state=0)
-        # model.fit(X, [0])
-        # with open(self.model_filepath, "wb") as fp:
-        #     pickle.dump(model, fp)
+            # print(ensemble)
+            # import ipdb; ipdb.set_trace()
+            model = NLP2023MetaNetwork(raw_size=200, feat_size=60, hidden_size=30, nlayers_1=2)
+            model.load_state_dict(ensemble)
+            probability = model(all_features).squeeze().item()
+        else:
+            probability = 0.5
 
-        # load the RandomForest from the learned-params location
-        with open(self.model_filepath, "rb") as fp:
-            regressor: RandomForestRegressor = pickle.load(fp)
-
-        # use the RandomForest to predict the trojan probability based on the feature vector X
-        probability = regressor.predict(X)[0]
         # clip the probability to reasonable values
         probability = np.clip(probability, a_min=0.01, a_max=0.99)
 
         # Test scratch space
-        with open(os.path.join(scratch_dirpath, 'test.txt'), 'w') as fh:
-            fh.write('this is a test')
+        with open(os.path.join(scratch_dirpath, 'test.txt'), 'a+') as fh:
+            fh.write(model_filepath + "," + str(probability))
 
         # write the trojan probability to the output file
         with open(result_filepath, "w") as fp:
+            s = model_filepath
             fp.write(str(probability))
 
-        logging.info("Trojan probability: {}".format(probability))
+        logging.info("Trojan probability: %f", probability)
+        return probability
 

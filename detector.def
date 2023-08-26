@@ -11,7 +11,8 @@ From: pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime
 
 %post
     pip install --upgrade pip
-    pip install torchvision jsonpickle jsonschema transformers evaluate datasets scikit-learn
+    pip install torchvision jsonpickle jsonschema transformers evaluate datasets scikit-learn pandas
+    pip install jsonargparse scikit-learn matplotlib ipdb
     chmod 755 /*.py
     chmod -R 755 /utils
 
