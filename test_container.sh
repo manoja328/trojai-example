@@ -1,6 +1,7 @@
-#export APPTAINER_TMPDIR=/workspace/manoj/tmp/
-#sudo -E apptainer build detector.simg detector.def
+python metafile_generator.py
 
+export APPTAINER_TMPDIR=/workspace/manoj/tmp/
+sudo -E apptainer build detector.simg detector.def
 
 singularity run \
 --bind /workspace/manoj/trojai-example-local \
@@ -14,3 +15,9 @@ singularity run \
 --metaparameters_filepath=./metaparameters.json \
 --schema_filepath=./metaparameters_schema.json \
 --learned_parameters_dirpath=./learned_parameters/
+
+
+~/gdrive files upload detector.simg
+echo "upload to google drive ...."
+echo "rename as:  nlp-question-answering-aug2023_sts_SRIweightv0.simg"
+echo "=== don't forget to share it with trojai@gmail ==="

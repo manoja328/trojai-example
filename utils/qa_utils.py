@@ -252,6 +252,7 @@ def tokenize(tokenizer, dataset):
     if hasattr(tokenizer, 'max_model_input_sizes'):
         if 'mobilebert-uncased' in tokenizer.max_model_input_sizes.keys():
             max_seq_length = tokenizer.max_model_input_sizes['mobilebert-uncased']
+            max_seq_length = min(tokenizer.model_max_length, 384)
         if 'gpt2' in tokenizer.max_model_input_sizes.keys():
             max_seq_length = tokenizer.max_model_input_sizes['gpt2']
     logging.info("Tokenizer model_max_length = {}".format(max_seq_length))

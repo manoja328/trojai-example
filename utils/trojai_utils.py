@@ -2,12 +2,9 @@ import numpy as np
 import csv
 import torch
 import os
-from tqdm import tqdm
 import time
 import copy
 import json
-import transformers
-import pandas as pd
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
@@ -88,7 +85,7 @@ def show_params(model):
 
 
 class NLP2023MetaNetwork(nn.Module):
-    def __init__(self, raw_size=200, feat_size=60, hidden_size=22, nlayers_1=4):
+    def __init__(self, raw_size=200, feat_size=60, hidden_size=22, nlayers_1=4, **kwargs):
         super().__init__()
         self.mlp_raw_to_feat = make_mlp(raw_size, feat_size, hidden_size, nlayers_1, nn.ReLU)
         self.mlp_feat_to_pred = make_mlp(2 * feat_size, 1, 30, 1, nn.ReLU)
@@ -102,7 +99,30 @@ class NLP2023MetaNetwork(nn.Module):
         """
         :returns: a score for whether the network is a Trojan or not
         """
-        out = self.mlp_raw_to_feat(x)
-        out = self.intermediate(out)
+        out = [self.mlp_raw_to_feat(d['feats']) for d in x]
+        out = [self.intermediate(h) for h in out]
+        out = torch.cat(out)
+        out = self.mlp_feat_to_pred(out)
+        return self.sigmoid(out)
+
+
+class NLP2023_Meta_LogFeats(nn.Module):
+    def __init__(self, raw_size=200, feat_size=60, hidden_size=22, nlayers_1=4, **kwargs):
+        super().__init__()
+        self.mlp_raw_to_feat = make_mlp(raw_size, feat_size, hidden_size, nlayers_1, nn.ReLU)
+        self.mlp_feat_to_pred = make_mlp(2 * feat_size, 1, hidden_size, 1, nn.ReLU)
+        self.sigmoid = nn.Sigmoid()
+
+    def intermediate(self, feat):
+        h = torch.cat((torch.mean(feat, dim=0, keepdim=True), torch.std(feat, dim=0, keepdim=True)), dim=1)
+        return h
+
+    def forward(self, x):
+        """
+        :returns: a score for whether the network is a Trojan or not
+        """
+        out = [self.mlp_raw_to_feat(d['feats']) for d in x]
+        out = [self.intermediate(h) for h in out]
+        out = torch.cat(out)
         out = self.mlp_feat_to_pred(out)
         return self.sigmoid(out)
