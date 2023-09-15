@@ -16,14 +16,27 @@ import numpy as np
 import datasets
 import torch
 import transformers
+from types import SimpleNamespace
 
 from utils.abstract import AbstractDetector
 from utils.models import load_model, load_models_dirpath
-import utils.qa_utils
 
-from utils import trojai_utils
 from utils.trojai_utils import *
 from utils.nlp2023_utils import *
+
+
+def predict(model, saved_config,raw_feat):
+    scores = []
+    kfold_state_dicts = saved_config.pop("state_dicts")
+    for fold_state in kfold_state_dicts:
+        model.load_state_dict(fold_state['state_dict'])
+        score = model(raw_feat).squeeze().item()
+        scores.append(score)
+    print(scores)
+    # majority voting
+    trojan_probability = sum(scores) / len(scores)
+    # trojan_probability = stats.mode(scores).mode
+    return float(trojan_probability)
 
 
 class Detector(AbstractDetector):
@@ -66,6 +79,82 @@ class Detector(AbstractDetector):
         return self.automatic_configure(models_dirpath)
 
 
+    def inference_on_example_data(self, model_filepath, tokenizer_filepath, examples_dirpath, scratch_dirpath):
+        #eval mode
+
+        all_params =  [
+        {
+            "trigger_location": "question",
+            "target": "CLS",
+            "trigger_token_length": 1,
+            "topk_candidate_tokens": 2,
+            "total_num_update": 1
+        },
+        {
+            "trigger_location": "context",
+            "target": "trigger",
+            "trigger_token_length": 2,
+            "topk_candidate_tokens": 2,
+            "total_num_update": 1,
+            "n_repeats": 1,
+            "end_on_last": False,
+            "logit": True
+        },
+        {
+            "trigger_location": "both",
+            "target": "trigger",
+            "trigger_token_length": 1,
+            "topk_candidate_tokens": 2,
+            "total_num_update": 1,
+            "n_repeats": 2,
+            "end_on_last": False,
+            "logit": True
+        }
+        ]
+
+
+        all_params =  [
+        {
+            "trigger_location": "question",
+            "target": "CLS",
+            "trigger_token_length": 4,
+            "topk_candidate_tokens": 120,
+            "total_num_update": 1
+        },
+        {
+            "trigger_location": "context",
+            "target": "trigger",
+            "trigger_token_length": 6,
+            "topk_candidate_tokens": 250,
+            "total_num_update": 2,
+            "n_repeats": 2,
+            "end_on_last": False,
+            "logit": True
+        },
+        {
+            "trigger_location": "both",
+            "target": "trigger",
+            "trigger_token_length": 6,
+            "topk_candidate_tokens": 250,
+            "total_num_update": 2,
+            "n_repeats": 2,
+            "end_on_last": False,
+            "logit": True
+        }
+        ]
+
+        features = []
+        for params in all_params:
+            feat,_,_ = run_trigger_search_on_model(model_filepath, examples_dirpath,
+                                        tokenizer_filepath,
+                                        scratch_dirpath = "./scratch",
+                                        seed_num = 1,
+                                        **params)
+
+            features.append(feat)
+
+        return torch.FloatTensor(features)
+
     def infer(
             self,
             model_filepath,
@@ -86,23 +175,25 @@ class Detector(AbstractDetector):
             tokenizer_filepath:
         """
 
-        # load the model
-        model, model_repr, model_class = load_model(model_filepath)
-
-        all_features = extract_params_hist(model.base_model.encoder)  # encoder only and no embeddings
+        all_features = self.inference_on_example_data(model_filepath, tokenizer_filepath, examples_dirpath, scratch_dirpath)
+        # all_features = torch.FloatTensor([2.0,1.0,0.00001])
         print("feature shape ",all_features.shape)
+        all_features =  [{"feats": all_features}]
+
+        config = SimpleNamespace()
+        config.raw_size = 3
+        config.nlayers_1 = 1
+
+        model = Simple_Meta(raw_size=config.raw_size, feat_size=3, hidden_size=3, nlayers_1=config.nlayers_1)
+        model.eval()
 
         if self.learned_parameters_dirpath is not None:
             try:
-                ensemble = torch.load(os.path.join(self.learned_parameters_dirpath, 'bestnlp2023_statedict.pth'))
+                ensemble = torch.load(os.path.join(self.learned_parameters_dirpath, 'bestnlp2023_modelv3.pth'))
             except:
-                ensemble = torch.load(os.path.join('/', self.learned_parameters_dirpath, 'bestnlp2023_statedict.pth'))
+                ensemble = torch.load(os.path.join('/', self.learned_parameters_dirpath, 'bestnlp2023_modelv3.pth'))
 
-            # print(ensemble)
-            # import ipdb; ipdb.set_trace()
-            model = NLP2023MetaNetwork(raw_size=200, feat_size=60, hidden_size=30, nlayers_1=2)
-            model.load_state_dict(ensemble)
-            probability = model(all_features).squeeze().item()
+            probability = predict(model, ensemble,all_features)
         else:
             probability = 0.5
 

@@ -396,8 +396,7 @@ def run_trigger_search_on_model(model_filepath, examples_dirpath,tokenizer_filep
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model, model_repr, model_class = load_model(model_filepath)
-
+    model, model_repr, model_class = load_model(model_filepath)   
     model.eval()
     model.to(device)
 
@@ -430,8 +429,10 @@ def run_trigger_search_on_model(model_filepath, examples_dirpath,tokenizer_filep
     print("Examples tokenized")
     tokenized_dataset.set_format('pt', columns=['input_ids', 'attention_mask', 'token_type_ids', 'start_positions',
                                                 'end_positions'])
-    dataloader = torch.utils.data.DataLoader(tokenized_dataset, batch_size=16, shuffle=False)
+    dataloader = torch.utils.data.DataLoader(tokenized_dataset, batch_size=32, shuffle=False)
     print(f"Examples wrapped into a dataloader of size {len(dataloader)}")
+
+    # import ipdb; ipdb.set_trace()
 
 
     sep_token = tokenizer.sep_token_id

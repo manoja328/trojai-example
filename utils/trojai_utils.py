@@ -126,3 +126,19 @@ class NLP2023_Meta_LogFeats(nn.Module):
         out = torch.cat(out)
         out = self.mlp_feat_to_pred(out)
         return self.sigmoid(out)
+
+class Simple_Meta(nn.Module):
+    def __init__(self, raw_size=200, feat_size=60, hidden_size=22, nlayers_1=4, **kwargs):
+        super().__init__()
+        self.mlp_raw_to_feat = make_mlp(raw_size, 1, hidden_size, nlayers_1, nn.ReLU)
+        self.sigmoid = nn.Sigmoid()
+
+
+    def forward(self, x):
+        """
+        :returns: a score for whether the network is a Trojan or not
+        """
+        out = [self.mlp_raw_to_feat(d['feats']) for d in x]
+        # import ipdb; ipdb.set_trace()
+        out = torch.cat(out,0).unsqueeze(1)
+        return self.sigmoid(out)
